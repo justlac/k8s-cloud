@@ -41,7 +41,7 @@ jobs:
           # Function to get latest successful run ID
           get_latest_run() {
             local repo=$1
-            local run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            local run_id=$(curl -s -H "Authorization: token ${{ secrets.PAT_TOKEN }}" \
               "https://api.github.com/repos/$repo/actions/workflows/generate-gatus-artifact.yml/runs?status=success&per_page=1" \
               | jq -r '.workflow_runs[0].id // "null"')
             echo $run_id
@@ -91,7 +91,7 @@ jobs:
         with:
           name: gatus-config-k8s-shared
           path: ./endpoints/k8s-shared/
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           repository: justlac/k8s-shared
           run-id: ${{ steps.get-runs.outputs.k8s-shared-run }}
 
@@ -102,7 +102,7 @@ jobs:
         with:
           name: gatus-config-k8s-cedille-production-v2
           path: ./endpoints/k8s-cedille-production-v2/
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           repository: justlac/k8s-cedille-production-v2
           run-id: ${{ steps.get-runs.outputs.k8s-prod-run }}
 
@@ -113,7 +113,7 @@ jobs:
         with:
           name: gatus-config-k8s-management-v2
           path: ./endpoints/k8s-management-v2/
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          github-token: ${{ secrets.PAT_TOKEN }}
           repository: justlac/k8s-management-v2
           run-id: ${{ steps.get-runs.outputs.k8s-mgmt-run }}
 
