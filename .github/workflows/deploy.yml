@@ -162,20 +162,33 @@ jobs:
             echo "📊 Found artifact files to combine:"
             for file in $artifact_files; do
               echo "  - $file"
+              # Show endpoint count in each file
+              count=$(yq eval '.endpoints | length' "$file" 2>/dev/null || echo "0")
+              echo "    └─ $count endpoints"
             done
+            
+            echo ""
+            echo "🔗 Combining all endpoint files..."
             
             # Combine all endpoint files into one
             for file in $artifact_files; do
               if [ -f "$file" ]; then
-                echo "🔗 Merging: $file"
-                yq eval-all 'select(fileIndex == 0) * {"endpoints": .endpoints + select(fileIndex == 1).endpoints}' ./endpoints/combined-gatus-endpoints.yml "$file" > temp-combined.yml
+                echo "  � Processing: $file"
+                # Use more robust merging - ensure we get all endpoints
+                yq eval-all '{"endpoints": (.[0].endpoints // []) + (.[1].endpoints // [])}' ./endpoints/combined-gatus-endpoints.yml "$file" > temp-combined.yml
                 mv temp-combined.yml ./endpoints/combined-gatus-endpoints.yml
+                
+                # Verify merge worked
+                new_count=$(yq eval '.endpoints | length' ./endpoints/combined-gatus-endpoints.yml)
+                echo "  ✅ Combined file now has: $new_count endpoints"
               fi
             done
           else
             echo "⚠️ No artifact files found, checking for existing gatus-endpoints.yml..."
             if [ -f "./endpoints/gatus-endpoints.yml" ]; then
               echo "📁 Using existing ./endpoints/gatus-endpoints.yml"
+              existing_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
+              echo "  └─ $existing_count endpoints found"
               cp ./endpoints/gatus-endpoints.yml ./endpoints/combined-gatus-endpoints.yml
             else
               echo "🧪 Creating test endpoint for demonstration"
@@ -191,52 +204,60 @@ jobs:
           # Replace the main endpoints file
           mv ./endpoints/combined-gatus-endpoints.yml ./endpoints/gatus-endpoints.yml
 
+          echo ""
           echo "✅ Combined gatus-endpoints.yml created!"
           endpoint_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
-          echo "📊 Total endpoints in combined file: $endpoint_count"
+          echo "📊 Final total endpoints: $endpoint_count"
 
           echo ""
-          echo "--- Combined gatus-endpoints.yml (first 30 lines) ---"
-          head -30 ./endpoints/gatus-endpoints.yml
+          echo "--- All endpoint names in combined file ---"
+          yq eval '.endpoints[].name' ./endpoints/gatus-endpoints.yml
+
+          echo ""
+          echo "--- Combined gatus-endpoints.yml (first 40 lines) ---"
+          head -40 ./endpoints/gatus-endpoints.yml
 
       # Aggregate all endpoint snippets into a single config.yaml (improved)
       - name: Aggregate Config Snippets
         run: |
-          # Ensure endpoints directory exists
-          mkdir -p ./endpoints/
+          echo "🔧 Creating final Gatus configuration..."
 
-          # Check if we have any gatus-endpoints.yml files
-          if [ ! "$(find ./endpoints/ -name "gatus-endpoints.yml" -type f)" ]; then
-            echo "⚠️ No gatus-endpoints.yml files found! Creating empty endpoints config."
-            mkdir -p ./endpoints/empty/
-            echo '{"endpoints": []}' | yq eval '.' > ./endpoints/empty/gatus-endpoints.yml
-          fi
-
-          # Count total endpoints before merging
-          total_endpoints=0
-          for file in $(find ./endpoints/ -name "gatus-endpoints.yml" -type f); do
-            if [ -f "$file" ]; then
-              count=$(yq eval '.endpoints | length' "$file" 2>/dev/null || echo "0")
-              echo "📊 $file: $count endpoints"
-              total_endpoints=$((total_endpoints + count))
+          # Use the combined gatus-endpoints.yml file created in the previous step
+          if [ -f "./endpoints/gatus-endpoints.yml" ]; then
+            endpoint_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
+            echo "📊 Using combined endpoints file with $endpoint_count endpoints"
+            
+            # Create the final config by combining base config with endpoints
+            if [ -f "gatus-base-config.yml" ]; then
+              echo "🔧 Merging gatus-base-config.yml with endpoints"
+              yq eval-all 'select(fileIndex == 0) *+ select(fileIndex == 1)' gatus-base-config.yml ./endpoints/gatus-endpoints.yml > config.yaml
+            else
+              echo "🔧 No base config found, using endpoints only"
+              cp ./endpoints/gatus-endpoints.yml config.yaml
             fi
-          done
-          echo "📊 Total endpoints to merge: $total_endpoints"
-
-          # Create the final config by combining base config with all endpoints
-          if [ -f "gatus-base-config.yml" ]; then
-            echo "🔧 Using gatus-base-config.yml as base"
-            yq eval-all 'select(fileIndex == 0) *+ {"endpoints": (.endpoints // []) + ([select(fileIndex > 0).endpoints] | flatten)}' gatus-base-config.yml $(find ./endpoints/ -name "gatus-endpoints.yml" -type f) > config.yaml
           else
-            echo "🔧 No base config found, creating config with endpoints only"
-            echo 'endpoints: []' > config.yaml
-            for file in $(find ./endpoints/ -name "gatus-endpoints.yml" -type f); do
-              if [ -f "$file" ]; then
-                yq eval-all 'select(fileIndex == 0) *+ {"endpoints": .endpoints + select(fileIndex == 1).endpoints}' config.yaml "$file" > temp-config.yaml
-                mv temp-config.yaml config.yaml
-              fi
-            done
+            echo "❌ ERROR: No combined gatus-endpoints.yml file found!"
+            exit 1
           fi
+
+          echo ""
+          echo "--- Generated Gatus Config (first 50 lines) ---"
+          head -50 config.yaml
+
+          echo ""
+          echo "--- Config validation ---"
+          final_count=$(yq eval '.endpoints | length' config.yaml)
+          echo "✅ $final_count endpoints in final config"
+
+          if [ "$final_count" -eq 0 ]; then
+            echo "❌ ERROR: No endpoints found in final config!"
+            exit 1
+          fi
+
+          # Show all endpoint names for verification
+          echo ""
+          echo "--- All Endpoint Names ---"
+          yq eval '.endpoints[].name' config.yaml
 
           echo ""
           echo "--- Generated Gatus Config (first 50 lines) ---"
