@@ -147,6 +147,58 @@ jobs:
             echo "No endpoint files to display"
           fi
 
+      # Create combined gatus-endpoints.yml file from downloaded artifacts
+      - name: Create Combined Endpoints File
+        run: |
+          echo "📋 Creating combined gatus-endpoints.yml file..."
+
+          # Initialize empty endpoints array
+          echo "endpoints: []" > ./endpoints/combined-gatus-endpoints.yml
+
+          # Find all gatus-endpoints.yml files from downloaded artifacts (in subdirectories)
+          artifact_files=$(find ./endpoints/ -mindepth 2 -name "gatus-endpoints.yml" -type f)
+
+          if [ -n "$artifact_files" ]; then
+            echo "📊 Found artifact files to combine:"
+            for file in $artifact_files; do
+              echo "  - $file"
+            done
+            
+            # Combine all endpoint files into one
+            for file in $artifact_files; do
+              if [ -f "$file" ]; then
+                echo "🔗 Merging: $file"
+                yq eval-all 'select(fileIndex == 0) * {"endpoints": .endpoints + select(fileIndex == 1).endpoints}' ./endpoints/combined-gatus-endpoints.yml "$file" > temp-combined.yml
+                mv temp-combined.yml ./endpoints/combined-gatus-endpoints.yml
+              fi
+            done
+          else
+            echo "⚠️ No artifact files found, checking for existing gatus-endpoints.yml..."
+            if [ -f "./endpoints/gatus-endpoints.yml" ]; then
+              echo "📁 Using existing ./endpoints/gatus-endpoints.yml"
+              cp ./endpoints/gatus-endpoints.yml ./endpoints/combined-gatus-endpoints.yml
+            else
+              echo "🧪 Creating test endpoint for demonstration"
+              echo 'endpoints:' > ./endpoints/combined-gatus-endpoints.yml
+              echo '  - name: test-endpoint' >> ./endpoints/combined-gatus-endpoints.yml
+              echo '    url: "https://httpbin.org/status/200"' >> ./endpoints/combined-gatus-endpoints.yml
+              echo '    interval: 30s' >> ./endpoints/combined-gatus-endpoints.yml
+              echo '    conditions:' >> ./endpoints/combined-gatus-endpoints.yml
+              echo '      - "[STATUS] == 200"' >> ./endpoints/combined-gatus-endpoints.yml
+            fi
+          fi
+
+          # Replace the main endpoints file
+          mv ./endpoints/combined-gatus-endpoints.yml ./endpoints/gatus-endpoints.yml
+
+          echo "✅ Combined gatus-endpoints.yml created!"
+          endpoint_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
+          echo "📊 Total endpoints in combined file: $endpoint_count"
+
+          echo ""
+          echo "--- Combined gatus-endpoints.yml (first 30 lines) ---"
+          head -30 ./endpoints/gatus-endpoints.yml
+
       # Aggregate all endpoint snippets into a single config.yaml (improved)
       - name: Aggregate Config Snippets
         run: |

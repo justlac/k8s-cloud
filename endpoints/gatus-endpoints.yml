@@ -1,0 +1,97 @@
+endpoints:
+  # k8s-shared endpoints
+  - name: k8s-shared-api
+    url: "https://api.k8s-shared.cedille.club/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1000"
+    alerts:
+      - type: discord
+        description: "k8s-shared API is down"
+        send-on-resolved: true
+
+  - name: k8s-shared-frontend
+    url: "https://k8s-shared.cedille.club"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: discord
+        description: "k8s-shared Frontend is down"
+        send-on-resolved: true
+
+  # k8s-cedille-production-v2 endpoints
+  - name: cedille-website
+    url: "https://cedille.club"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1500"
+    alerts:
+      - type: discord
+        description: "Cedille main website is down"
+        send-on-resolved: true
+
+  - name: cedille-api
+    url: "https://api.cedille.club/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1000"
+    alerts:
+      - type: discord
+        description: "Cedille API is down"
+        send-on-resolved: true
+
+  - name: cedille-auth
+    url: "https://auth.cedille.club/health"
+    interval: 30s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 1500"
+    alerts:
+      - type: discord
+        description: "Cedille Auth service is down"
+        send-on-resolved: true
+
+  # k8s-management-v2 endpoints
+  - name: grafana-dashboard
+    url: "https://grafana.cedille.club"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 3000"
+    alerts:
+      - type: discord
+        description: "Grafana dashboard is down"
+        send-on-resolved: true
+
+  - name: prometheus-metrics
+    url: "https://prometheus.cedille.club/-/healthy"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: discord
+        description: "Prometheus metrics server is down"
+        send-on-resolved: true
+
+  - name: alertmanager
+    url: "https://alertmanager.cedille.club/-/healthy"
+    interval: 60s
+    conditions:
+      - "[STATUS] == 200"
+      - "[RESPONSE_TIME] < 2000"
+    alerts:
+      - type: discord
+        description: "AlertManager is down"
+        send-on-resolved: true
+
+# Metadata
+# Source: Combined test file for k8s-cloud
+# Generated: 2025-09-26T00:00:00Z
+# Commit: test-commit
+# Run ID: test-run-123
