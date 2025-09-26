@@ -24,89 +24,181 @@ jobs:
       - name: Install yq (YAML Processor)
         run: sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && sudo chmod +x /usr/bin/yq
 
-      # Download artifacts from child repositories
+      # Show trigger context for debugging
+      - name: Show trigger context
+        run: |
+          echo "Trigger event: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "Triggered by: ${{ github.event.client_payload.source_repo }}"
+            echo "Run ID: ${{ github.event.client_payload.run_id }}"
+            echo "Commit: ${{ github.event.client_payload.commit }}"
+          fi
+
+      # Get latest workflow runs for child repos (improved logic)
       - name: Get latest workflow runs for child repos
         id: get-runs
         run: |
-          # Get the latest successful workflow run ID for each child repo
-          K8S_SHARED_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/justlac/k8s-shared/actions/workflows/test.yml/runs?status=success&per_page=1" \
-            | jq -r '.workflow_runs[0].id')
+          # Function to get latest successful run ID
+          get_latest_run() {
+            local repo=$1
+            local run_id=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/$repo/actions/workflows/generate-gatus-artifact.yml/runs?status=success&per_page=1" \
+              | jq -r '.workflow_runs[0].id // "null"')
+            echo $run_id
+          }
 
-          K8S_PROD_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/justlac/k8s-cedille-production-v2/actions/workflows/test.yml/runs?status=success&per_page=1" \
-            | jq -r '.workflow_runs[0].id')
+          # If triggered by repository_dispatch, use the specific run_id if available
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            TRIGGERED_REPO="${{ github.event.client_payload.source_repo }}"
+            TRIGGERED_RUN_ID="${{ github.event.client_payload.run_id }}"
+            echo "Processing notification from $TRIGGERED_REPO (run: $TRIGGERED_RUN_ID)"
+          fi
 
-          K8S_MGMT_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/justlac/k8s-management-v2/actions/workflows/test.yml/runs?status=success&per_page=1" \
-            | jq -r '.workflow_runs[0].id')
+          # Get run IDs for all repos (fallback to latest if not specified)
+          K8S_SHARED_RUN=$(get_latest_run "justlac/k8s-shared")
+          K8S_PROD_RUN=$(get_latest_run "justlac/k8s-cedille-production-v2")  
+          K8S_MGMT_RUN=$(get_latest_run "justlac/k8s-management-v2")
+
+          # Override with specific run ID if this was triggered by repository_dispatch
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            case "$TRIGGERED_REPO" in
+              "justlac/k8s-shared")
+                K8S_SHARED_RUN="${{ github.event.client_payload.run_id }}"
+                ;;
+              "justlac/k8s-cedille-production-v2")
+                K8S_PROD_RUN="${{ github.event.client_payload.run_id }}"
+                ;;
+              "justlac/k8s-management-v2")  
+                K8S_MGMT_RUN="${{ github.event.client_payload.run_id }}"
+                ;;
+            esac
+          fi
 
           echo "k8s-shared-run=$K8S_SHARED_RUN" >> $GITHUB_OUTPUT
           echo "k8s-prod-run=$K8S_PROD_RUN" >> $GITHUB_OUTPUT
           echo "k8s-mgmt-run=$K8S_MGMT_RUN" >> $GITHUB_OUTPUT
 
-      # Download artifact from k8s-shared repo
+          echo "Using run IDs:"
+          echo "  k8s-shared: $K8S_SHARED_RUN"
+          echo "  k8s-cedille-production-v2: $K8S_PROD_RUN"
+          echo "  k8s-management-v2: $K8S_MGMT_RUN"
+
+      # Download artifacts from child repositories (with better error handling)
       - name: Download k8s-shared artifact
+        continue-on-error: true
+        id: download-shared
         uses: actions/download-artifact@v4
         with:
           name: gatus-config-k8s-shared
-          path: ./endpoints/
+          path: ./endpoints/k8s-shared/
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: justlac/k8s-shared
           run-id: ${{ steps.get-runs.outputs.k8s-shared-run }}
 
-      # Download artifact from k8s-cedille-production-v2 repo
       - name: Download k8s-cedille-production-v2 artifact
+        continue-on-error: true
+        id: download-prod
         uses: actions/download-artifact@v4
         with:
           name: gatus-config-k8s-cedille-production-v2
-          path: ./endpoints/
+          path: ./endpoints/k8s-cedille-production-v2/
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: justlac/k8s-cedille-production-v2
           run-id: ${{ steps.get-runs.outputs.k8s-prod-run }}
 
-      # Download artifact from k8s-management-v2 repo
       - name: Download k8s-management-v2 artifact
+        continue-on-error: true
+        id: download-mgmt
         uses: actions/download-artifact@v4
         with:
           name: gatus-config-k8s-management-v2
-          path: ./endpoints/
+          path: ./endpoints/k8s-management-v2/
           github-token: ${{ secrets.GITHUB_TOKEN }}
           repository: justlac/k8s-management-v2
           run-id: ${{ steps.get-runs.outputs.k8s-mgmt-run }}
+
+      # Report download status
+      - name: Report download status
+        run: |
+          echo "Download Results:"
+          echo "  k8s-shared: ${{ steps.download-shared.outcome }}"
+          echo "  k8s-cedille-production-v2: ${{ steps.download-prod.outcome }}"
+          echo "  k8s-management-v2: ${{ steps.download-mgmt.outcome }}"
 
       # List downloaded artifacts for debugging
       - name: List downloaded artifacts
         run: |
           echo "--- Downloaded Endpoint Files ---"
-          find ./endpoints/ -name "*.yml" -type f
+          find ./endpoints/ -name "gatus-endpoints.yml" -type f || echo "No gatus-endpoints.yml files found"
           echo ""
-          echo "--- File contents ---"
-          for file in ./endpoints/*.yml; do
-            echo "=== $file ==="
-            cat "$file"
-            echo ""
-          done
 
-      # Aggregate all endpoint snippets into a single config.yaml
-      - name: Aggregate Config Snippets
-        run: |
-          # Check if we have any endpoint files
-          if [ ! "$(ls -A ./endpoints/*.yml 2>/dev/null)" ]; then
-            echo "No endpoint files found! Creating empty endpoints config."
-            yq eval '{"endpoints": []}' > empty-endpoints.yml
-            yq eval-all 'select(fileIndex == 0)' gatus-base-config.yml empty-endpoints.yml > config.yaml
+          if [ "$(find ./endpoints/ -name "gatus-endpoints.yml" -type f)" ]; then
+            echo "--- File contents ---"
+            for file in $(find ./endpoints/ -name "gatus-endpoints.yml" -type f); do
+              echo "=== $file ==="
+              echo "Size: $(wc -l < "$file") lines"
+              head -20 "$file"  # Show first 20 lines
+              if [ $(wc -l < "$file") -gt 20 ]; then
+                echo "... (truncated, total $(wc -l < "$file") lines)"
+              fi
+              echo ""
+            done
           else
-            # Combine base config with all endpoint files
-            yq eval-all 'select(fileIndex == 0) *+ {"endpoints": .endpoints} | .endpoints += select(fileIndex > 0).endpoints' gatus-base-config.yml endpoints/*.yml > config.yaml
+            echo "No endpoint files to display"
           fi
 
-          echo "--- Generated Gatus Config ---"
-          cat config.yaml
+      # Aggregate all endpoint snippets into a single config.yaml (improved)
+      - name: Aggregate Config Snippets
+        run: |
+          # Ensure endpoints directory exists
+          mkdir -p ./endpoints/
 
+          # Check if we have any gatus-endpoints.yml files
+          if [ ! "$(find ./endpoints/ -name "gatus-endpoints.yml" -type f)" ]; then
+            echo "⚠️ No gatus-endpoints.yml files found! Creating empty endpoints config."
+            mkdir -p ./endpoints/empty/
+            echo '{"endpoints": []}' | yq eval '.' > ./endpoints/empty/gatus-endpoints.yml
+          fi
+
+          # Count total endpoints before merging
+          total_endpoints=0
+          for file in $(find ./endpoints/ -name "gatus-endpoints.yml" -type f); do
+            if [ -f "$file" ]; then
+              count=$(yq eval '.endpoints | length' "$file" 2>/dev/null || echo "0")
+              echo "📊 $file: $count endpoints"
+              total_endpoints=$((total_endpoints + count))
+            fi
+          done
+          echo "📊 Total endpoints to merge: $total_endpoints"
+
+          # Create the final config by combining base config with all endpoints
+          if [ -f "gatus-base-config.yml" ]; then
+            echo "🔧 Using gatus-base-config.yml as base"
+            yq eval-all 'select(fileIndex == 0) *+ {"endpoints": (.endpoints // []) + ([select(fileIndex > 0).endpoints] | flatten)}' gatus-base-config.yml $(find ./endpoints/ -name "gatus-endpoints.yml" -type f) > config.yaml
+          else
+            echo "🔧 No base config found, creating config with endpoints only"
+            echo 'endpoints: []' > config.yaml
+            for file in $(find ./endpoints/ -name "gatus-endpoints.yml" -type f); do
+              if [ -f "$file" ]; then
+                yq eval-all 'select(fileIndex == 0) *+ {"endpoints": .endpoints + select(fileIndex == 1).endpoints}' config.yaml "$file" > temp-config.yaml
+                mv temp-config.yaml config.yaml
+              fi
+            done
+          fi
+
+          echo ""
+          echo "--- Generated Gatus Config (first 50 lines) ---"
+          head -50 config.yaml
+
+          echo ""
           echo "--- Config validation ---"
-          yq eval '.endpoints | length' config.yaml
-          echo "endpoints found in final config"
+          final_count=$(yq eval '.endpoints | length' config.yaml)
+          echo "✅ $final_count endpoints in final config"
+
+          if [ "$final_count" -eq 0 ]; then
+            echo "❌ ERROR: No endpoints found in final config!"
+            exit 1
+          fi
 
       # Authenticate to Google Cloud without a password
       - id: "auth"
@@ -118,13 +210,23 @@ jobs:
       # Build and Push Docker Image to Google Artifact Registry
       - name: Build and Push Docker Image
         run: |
+          echo "🐳 Building Docker image..."
           gcloud auth configure-docker us-central1-docker.pkg.dev
-          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }} .
-          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }}
 
-      #  Deploy the new image to Google Cloud Run
+          # Build with better caching
+          docker build \
+            --tag us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }} \
+            --tag us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:latest \
+            .
+
+          echo "📤 Pushing Docker image..."
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }}
+          docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:latest
+
+      # Deploy the new image to Google Cloud Run
       - name: Deploy to Cloud Run
         run: |
+          echo "🚀 Deploying to Cloud Run..."
           gcloud run deploy gatus-dashboard-cedille \
             --image=us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }} \
             --region=northamerica-northeast1 \
@@ -133,3 +235,18 @@ jobs:
             --max-instances=1 \
             --volume name=gatus-db,type=cloud-storage,bucket=${{ secrets.GCP_BUCKET_NAME }} \
             --volume-mount name=gatus-db,mount-path=/data
+            
+          echo "✅ Deployment completed!"
+
+      # Post deployment summary
+      - name: Deployment Summary
+        run: |
+          echo "📋 === DEPLOYMENT SUMMARY ==="
+          echo "🔥 Trigger: ${{ github.event_name }}"
+          if [ "${{ github.event_name }}" = "repository_dispatch" ]; then
+            echo "📡 Triggered by: ${{ github.event.client_payload.source_repo }}"
+          fi
+          echo "📊 Endpoints deployed: $(yq eval '.endpoints | length' config.yaml)"
+          echo "🐳 Image: us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }}"
+          echo "🌍 Service: gatus-dashboard-cedille (northamerica-northeast1)"
+          echo "✅ Status: SUCCESS"
