@@ -152,8 +152,8 @@ jobs:
         run: |
           echo "📋 Creating combined gatus-endpoints.yml file..."
 
-          # Initialize empty endpoints array
-          echo "endpoints: []" > ./endpoints/combined-gatus-endpoints.yml
+          # Create endpoints directory if it doesn't exist
+          mkdir -p ./endpoints
 
           # Find all gatus-endpoints.yml files from downloaded artifacts (in subdirectories)
           artifact_files=$(find ./endpoints/ -mindepth 2 -name "gatus-endpoints.yml" -type f)
@@ -170,43 +170,33 @@ jobs:
             echo ""
             echo "🔗 Combining all endpoint files..."
             
-            # Combine all endpoint files into one
-            for file in $artifact_files; do
-              if [ -f "$file" ]; then
-                echo "  🔄 Processing: $file"
-              fi
-            done
-            
-            # Use Python script to merge all files at once
+            # Use Python script to merge all files directly into final location
             echo "🔗 Merging all endpoint files using Python script..."
-            python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml $artifact_files
+            python3 .github/scripts/merge_endpoints.py ./endpoints/gatus-endpoints.yml $artifact_files
           else
             echo "⚠️ No artifact files found, checking for existing gatus-endpoints.yml..."
             if [ -f "./endpoints/gatus-endpoints.yml" ]; then
               echo "📁 Using existing ./endpoints/gatus-endpoints.yml"
               existing_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
               echo "  └─ $existing_count endpoints found"
-              python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml ./endpoints/gatus-endpoints.yml
+              # File already exists, no need to merge with itself
             else
               echo "🧪 Creating empty endpoints file (no artifacts or existing file found)"
-              python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml
+              python3 .github/scripts/merge_endpoints.py ./endpoints/gatus-endpoints.yml
             fi
           fi
 
-          # Replace the main endpoints file
-          mv ./endpoints/combined-gatus-endpoints.yml ./endpoints/gatus-endpoints.yml
-
           echo ""
-          echo "✅ Combined gatus-endpoints.yml created!"
+          echo "✅ Final gatus-endpoints.yml created!"
           endpoint_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
-          echo "📊 Final total endpoints: $endpoint_count"
+          echo "📊 Total endpoints: $endpoint_count"
 
           echo ""
-          echo "--- All endpoint names in combined file ---"
+          echo "--- All endpoint names in final file ---"
           yq eval '.endpoints[].name' ./endpoints/gatus-endpoints.yml
 
           echo ""
-          echo "--- Combined gatus-endpoints.yml (first 40 lines) ---"
+          echo "--- Final gatus-endpoints.yml (first 40 lines) ---"
           head -40 ./endpoints/gatus-endpoints.yml
 
       # Aggregate all endpoint snippets into a single config.yaml (improved)
@@ -272,7 +262,10 @@ jobs:
           echo "📁 Current directory contents:"
           ls -la
           echo ""
-          echo "📄 Dockerfile contents:"
+          echo "� Endpoints directory contents:"
+          ls -la ./endpoints/
+          echo ""
+          echo "�📄 Dockerfile contents:"
           cat Dockerfile
           echo ""
           echo "⚙️ config.yaml contents (first 20 lines):"
