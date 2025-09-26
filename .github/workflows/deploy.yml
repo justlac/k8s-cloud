@@ -1,18 +1,21 @@
 name: Deploy Gatus to Google Cloud Run
 
 on:
-  push:
-    branches: ["main"]
-    paths:
-      - 'endpoints/**'
+  # Trigger when child repos create new artifacts (via repository dispatch)
+  repository_dispatch:
+    types: [gatus-config-updated]
+
+  # Also allow manual runs and schedule
   workflow_dispatch: # Allows manual runs
+  schedule:
+    - cron: "0 */6 * * *" # Every 6 hours to check for new artifacts
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     permissions:
-      contents: 'read'
-      id-token: 'write' # Required for Workload Identity Federation (passwordless auth)
+      contents: "read"
+      id-token: "write" # Required for Workload Identity Federation (passwordless auth)
 
     steps:
       - name: Checkout Config Repo
@@ -21,16 +24,79 @@ jobs:
       - name: Install yq (YAML Processor)
         run: sudo wget https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64 -O /usr/bin/yq && sudo chmod +x /usr/bin/yq
 
+      # Download artifacts from child repositories
+      - name: Get latest workflow runs for child repos
+        id: get-runs
+        run: |
+          # Get the latest successful workflow run ID for each child repo
+          K8S_SHARED_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/justlac/k8s-shared-test/actions/workflows/test.yml/runs?status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].id')
+
+          # Add other child repos here as needed
+          # K8S_PROD_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+          #   "https://api.github.com/repos/justlac/k8s-prod/actions/workflows/test.yml/runs?status=success&per_page=1" \
+          #   | jq -r '.workflow_runs[0].id')
+
+          echo "k8s-shared-run=$K8S_SHARED_RUN" >> $GITHUB_OUTPUT
+          # echo "k8s-prod-run=$K8S_PROD_RUN" >> $GITHUB_OUTPUT
+
+      # Download artifact from k8s-shared-test repo
+      - name: Download k8s-shared-test artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gatus-config-k8s-shared-test
+          path: ./endpoints/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: justlac/k8s-shared-test
+          run-id: ${{ steps.get-runs.outputs.k8s-shared-run }}
+
+      # Download artifacts from other child repos (add as needed)
+      # - name: Download k8s-prod artifact
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: gatus-config-k8s-prod
+      #     path: ./endpoints/
+      #     github-token: ${{ secrets.GITHUB_TOKEN }}
+      #     repository: justlac/k8s-prod
+      #     run-id: ${{ steps.get-runs.outputs.k8s-prod-run }}
+
+      # List downloaded artifacts for debugging
+      - name: List downloaded artifacts
+        run: |
+          echo "--- Downloaded Endpoint Files ---"
+          find ./endpoints/ -name "*.yml" -type f
+          echo ""
+          echo "--- File contents ---"
+          for file in ./endpoints/*.yml; do
+            echo "=== $file ==="
+            cat "$file"
+            echo ""
+          done
+
       # Aggregate all endpoint snippets into a single config.yaml
       - name: Aggregate Config Snippets
         run: |
-          yq eval-all 'select(fileIndex == 0) *+ {"endpoints": .endpoints} | .endpoints += select(fileIndex > 0).endpoints' gatus-base-config.yml endpoints/*.yml > config.yaml
+          # Check if we have any endpoint files
+          if [ ! "$(ls -A ./endpoints/*.yml 2>/dev/null)" ]; then
+            echo "No endpoint files found! Creating empty endpoints config."
+            yq eval '{"endpoints": []}' > empty-endpoints.yml
+            yq eval-all 'select(fileIndex == 0)' gatus-base-config.yml empty-endpoints.yml > config.yaml
+          else
+            # Combine base config with all endpoint files
+            yq eval-all 'select(fileIndex == 0) *+ {"endpoints": .endpoints} | .endpoints += select(fileIndex > 0).endpoints' gatus-base-config.yml endpoints/*.yml > config.yaml
+          fi
+
           echo "--- Generated Gatus Config ---"
           cat config.yaml
 
+          echo "--- Config validation ---"
+          yq eval '.endpoints | length' config.yaml
+          echo "endpoints found in final config"
+
       # Authenticate to Google Cloud without a password
-      - id: 'auth'
-        uses: 'google-github-actions/auth@v1'
+      - id: "auth"
+        uses: "google-github-actions/auth@v1"
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
           service_account: ${{ secrets.GCP_SERVICE_ACCOUNT }}
@@ -38,9 +104,8 @@ jobs:
       # Build and Push Docker Image to Google Artifact Registry
       - name: Build and Push Docker Image
         run: |
-         
           gcloud auth configure-docker us-central1-docker.pkg.dev
-          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }}
+          docker build -t us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }} .
           docker push us-central1-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/gatus-cedille/gatus-app:${{ github.sha }}
 
       #  Deploy the new image to Google Cloud Run
@@ -51,9 +116,6 @@ jobs:
             --region=northamerica-northeast1 \
             --platform=managed \
             --allow-unauthenticated \
-            \
             --max-instances=1 \
-            \
-            --volume name=gatus-db,gcs,bucket=${{ secrets.GCP_BUCKET_NAME }} \
-            \
-            --mount-volume name=gatus-db,mount-path=/data
+            --volume name=gatus-db,type=cloud-storage,bucket=${{ secrets.GCP_BUCKET_NAME }} \
+            --volume-mount name=gatus-db,mount-path=/data
