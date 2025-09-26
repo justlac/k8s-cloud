@@ -175,9 +175,18 @@ jobs:
               if [ -f "$file" ]; then
                 echo "  � Processing: $file"
                 # Use more robust merging - ensure we get all endpoints
-                yq eval-all '{"endpoints": (.[0].endpoints // []) + (.[1].endpoints // [])}' ./endpoints/combined-gatus-endpoints.yml "$file" > temp-combined.yml
-                mv temp-combined.yml ./endpoints/combined-gatus-endpoints.yml
-                
+                python3 -c "
+                  import yaml
+                  with open('./endpoints/combined-gatus-endpoints.yml', 'r') as f:
+                      combined = yaml.safe_load(f) or {'endpoints': []}
+                  with open('$file', 'r') as f:
+                      new_data = yaml.safe_load(f) or {'endpoints': []}
+                  if 'endpoints' in new_data:
+                      combined['endpoints'].extend(new_data['endpoints'])
+                  with open('./endpoints/combined-gatus-endpoints.yml', 'w') as f:
+                      yaml.dump(combined, f, default_flow_style=False, sort_keys=False)
+                  "
+                                  
                 # Verify merge worked
                 new_count=$(yq eval '.endpoints | length' ./endpoints/combined-gatus-endpoints.yml)
                 echo "  ✅ Combined file now has: $new_count endpoints"
