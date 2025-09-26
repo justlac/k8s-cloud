@@ -1,0 +1,40 @@
+name: Update Gatus Monitoring Config
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - 'apps/**' # Only run if app configs change
+
+jobs:
+  generate-and-push-config:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Generate Gatus endpoints snippet
+        run: python3 .github/scripts/extract_fqdns.py
+      - name: Rename snippet file for uniqueness
+        run: mv gatus-endpoints.yml ${{ github.event.repository.name }}.yml
+
+      - name: Push snippet to Gatus Config Repo
+        uses: dmnemec/copy_file_to_another_repo_action@main
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.GATUS_REPO_PAT }}
+        with:
+          source_file: '${{ github.event.repository.name }}.yml'
+          destination_repo: 'cedille/gatus-config-repo'
+          destination_folder: 'endpoints'
+          user_email: 'action@github.com'
+          user_name: 'GitHub Actions'
+          commit_message: 'Update monitoring config from ${{ github.event.repository.name }}'
