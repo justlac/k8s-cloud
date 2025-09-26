@@ -30,36 +30,50 @@ jobs:
         run: |
           # Get the latest successful workflow run ID for each child repo
           K8S_SHARED_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/justlac/k8s-shared-test/actions/workflows/test.yml/runs?status=success&per_page=1" \
+            "https://api.github.com/repos/justlac/k8s-shared/actions/workflows/test.yml/runs?status=success&per_page=1" \
             | jq -r '.workflow_runs[0].id')
 
-          # Add other child repos here as needed
-          # K8S_PROD_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-          #   "https://api.github.com/repos/justlac/k8s-prod/actions/workflows/test.yml/runs?status=success&per_page=1" \
-          #   | jq -r '.workflow_runs[0].id')
+          K8S_PROD_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/justlac/k8s-cedille-production-v2/actions/workflows/test.yml/runs?status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].id')
+
+          K8S_MGMT_RUN=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/justlac/k8s-management-v2/actions/workflows/test.yml/runs?status=success&per_page=1" \
+            | jq -r '.workflow_runs[0].id')
 
           echo "k8s-shared-run=$K8S_SHARED_RUN" >> $GITHUB_OUTPUT
-          # echo "k8s-prod-run=$K8S_PROD_RUN" >> $GITHUB_OUTPUT
+          echo "k8s-prod-run=$K8S_PROD_RUN" >> $GITHUB_OUTPUT
+          echo "k8s-mgmt-run=$K8S_MGMT_RUN" >> $GITHUB_OUTPUT
 
-      # Download artifact from k8s-shared-test repo
-      - name: Download k8s-shared-test artifact
+      # Download artifact from k8s-shared repo
+      - name: Download k8s-shared artifact
         uses: actions/download-artifact@v4
         with:
-          name: gatus-config-k8s-shared-test
+          name: gatus-config-k8s-shared
           path: ./endpoints/
           github-token: ${{ secrets.GITHUB_TOKEN }}
-          repository: justlac/k8s-shared-test
+          repository: justlac/k8s-shared
           run-id: ${{ steps.get-runs.outputs.k8s-shared-run }}
 
-      # Download artifacts from other child repos (add as needed)
-      # - name: Download k8s-prod artifact
-      #   uses: actions/download-artifact@v4
-      #   with:
-      #     name: gatus-config-k8s-prod
-      #     path: ./endpoints/
-      #     github-token: ${{ secrets.GITHUB_TOKEN }}
-      #     repository: justlac/k8s-prod
-      #     run-id: ${{ steps.get-runs.outputs.k8s-prod-run }}
+      # Download artifact from k8s-cedille-production-v2 repo
+      - name: Download k8s-cedille-production-v2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gatus-config-k8s-cedille-production-v2
+          path: ./endpoints/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: justlac/k8s-cedille-production-v2
+          run-id: ${{ steps.get-runs.outputs.k8s-prod-run }}
+
+      # Download artifact from k8s-management-v2 repo
+      - name: Download k8s-management-v2 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: gatus-config-k8s-management-v2
+          path: ./endpoints/
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: justlac/k8s-management-v2
+          run-id: ${{ steps.get-runs.outputs.k8s-mgmt-run }}
 
       # List downloaded artifacts for debugging
       - name: List downloaded artifacts

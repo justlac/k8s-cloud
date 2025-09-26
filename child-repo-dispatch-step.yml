@@ -1,0 +1,17 @@
+# Add this step to each child repository's workflow
+# This should be added after the "Upload config as artifact" step
+
+- name: Notify master pipeline of new artifact
+  if: success()
+  uses: peter-evans/repository-dispatch@v3
+  with:
+    token: ${{ secrets.MASTER_REPO_TOKEN }}
+    repository: justlac/k8s-cloud
+    event-type: gatus-config-updated
+    client-payload: |
+      {
+        "source_repo": "${{ github.repository }}",
+        "artifact_name": "gatus-config-${{ github.event.repository.name }}",
+        "commit": "${{ github.sha }}",
+        "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+      }
