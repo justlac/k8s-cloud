@@ -200,6 +200,23 @@ jobs:
             exit 1
           fi
 
+      # Test Docker build locally (before GCP auth)
+      - name: Test Docker Build
+        run: |
+          echo "🧪 Testing Docker build locally..."
+          echo "📁 Current directory contents:"
+          ls -la
+          echo ""
+          echo "📄 Dockerfile contents:"
+          cat Dockerfile
+          echo ""
+          echo "⚙️ config.yaml contents (first 20 lines):"
+          head -20 config.yaml
+          echo ""
+          echo "🐳 Building Docker image locally..."
+          docker build -t gatus-test:local .
+          echo "✅ Docker build successful!"
+
       # Authenticate to Google Cloud without a password
       - id: "auth"
         uses: "google-github-actions/auth@v1"
@@ -210,7 +227,7 @@ jobs:
       # Build and Push Docker Image to Google Artifact Registry
       - name: Build and Push Docker Image
         run: |
-          echo "🐳 Building Docker image..."
+          echo "🐳 Building Docker image for GCP..."
           gcloud auth configure-docker us-central1-docker.pkg.dev
 
           # Build with better caching
