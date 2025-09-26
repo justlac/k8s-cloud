@@ -173,40 +173,23 @@ jobs:
             # Combine all endpoint files into one
             for file in $artifact_files; do
               if [ -f "$file" ]; then
-                echo "  � Processing: $file"
-                # Use more robust merging - ensure we get all endpoints
-                python3 -c "
-                import yaml
-                with open('./endpoints/combined-gatus-endpoints.yml', 'r') as f:
-                    combined = yaml.safe_load(f) or {'endpoints': []}
-                with open('$file', 'r') as f:
-                    new_data = yaml.safe_load(f) or {'endpoints': []}
-                if 'endpoints' in new_data:
-                    combined['endpoints'].extend(new_data['endpoints'])
-                with open('./endpoints/combined-gatus-endpoints.yml', 'w') as f:
-                    yaml.dump(combined, f, default_flow_style=False, sort_keys=False)
-                "
-                                  
-                # Verify merge worked
-                new_count=$(yq eval '.endpoints | length' ./endpoints/combined-gatus-endpoints.yml)
-                echo "  ✅ Combined file now has: $new_count endpoints"
+                echo "  🔄 Processing: $file"
               fi
             done
+            
+            # Use Python script to merge all files at once
+            echo "🔗 Merging all endpoint files using Python script..."
+            python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml $artifact_files
           else
             echo "⚠️ No artifact files found, checking for existing gatus-endpoints.yml..."
             if [ -f "./endpoints/gatus-endpoints.yml" ]; then
               echo "📁 Using existing ./endpoints/gatus-endpoints.yml"
               existing_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
               echo "  └─ $existing_count endpoints found"
-              cp ./endpoints/gatus-endpoints.yml ./endpoints/combined-gatus-endpoints.yml
+              python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml ./endpoints/gatus-endpoints.yml
             else
-              echo "🧪 Creating test endpoint for demonstration"
-              echo 'endpoints:' > ./endpoints/combined-gatus-endpoints.yml
-              echo '  - name: test-endpoint' >> ./endpoints/combined-gatus-endpoints.yml
-              echo '    url: "https://httpbin.org/status/200"' >> ./endpoints/combined-gatus-endpoints.yml
-              echo '    interval: 30s' >> ./endpoints/combined-gatus-endpoints.yml
-              echo '    conditions:' >> ./endpoints/combined-gatus-endpoints.yml
-              echo '      - "[STATUS] == 200"' >> ./endpoints/combined-gatus-endpoints.yml
+              echo "🧪 Creating empty endpoints file (no artifacts or existing file found)"
+              python3 .github/scripts/merge_endpoints.py ./endpoints/combined-gatus-endpoints.yml
             fi
           fi
 
