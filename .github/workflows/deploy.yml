@@ -199,10 +199,10 @@ jobs:
           echo "--- Final gatus-endpoints.yml (first 40 lines) ---"
           head -40 ./endpoints/gatus-endpoints.yml
 
-      # Aggregate all endpoint snippets into a single config.yaml (improved)
-      - name: Aggregate Config Snippets
+      # Aggregate all endpoint snippets into a single endpoints/gatus-endpoints.yml (improved)
+      - name: Update Combined Endpoints File with Base Configuration
         run: |
-          echo "🔧 Creating final Gatus configuration..."
+          echo "🔧 Creating final Gatus configuration in endpoints/gatus-endpoints.yml..."
 
           # Use the combined gatus-endpoints.yml file created in the previous step
           if [ -f "./endpoints/gatus-endpoints.yml" ]; then
@@ -211,24 +211,30 @@ jobs:
             
             # Create the final config by combining base config with endpoints
             if [ -f "gatus-base-config.yml" ]; then
-              echo "🔧 Merging gatus-base-config.yml with endpoints"
-              yq eval-all 'select(fileIndex == 0) *+ select(fileIndex == 1)' gatus-base-config.yml ./endpoints/gatus-endpoints.yml > config.yaml
+              echo "🔧 Merging gatus-base-config.yml with endpoints into endpoints/gatus-endpoints.yml"
+              yq eval-all 'select(fileIndex == 0) *+ select(fileIndex == 1)' gatus-base-config.yml ./endpoints/gatus-endpoints.yml > ./endpoints/gatus-endpoints-temp.yml
+              mv ./endpoints/gatus-endpoints-temp.yml ./endpoints/gatus-endpoints.yml
             else
-              echo "🔧 No base config found, using endpoints only"
-              cp ./endpoints/gatus-endpoints.yml config.yaml
+              echo "🔧 No base config found, keeping endpoints-only configuration"
+              # File already exists with just endpoints, no need to modify
             fi
           else
             echo "❌ ERROR: No combined gatus-endpoints.yml file found!"
             exit 1
           fi
 
-          echo ""
-          echo "--- Generated Gatus Config (first 50 lines) ---"
-          head -50 config.yaml
+          # Ensure the endpoints/gatus-endpoints.yml file was created/updated successfully
+          if [ ! -f "./endpoints/gatus-endpoints.yml" ]; then
+            echo "❌ ERROR: Failed to create/update endpoints/gatus-endpoints.yml file!"
+            exit 1
+          fi
+
+          echo "✅ endpoints/gatus-endpoints.yml file updated successfully!"
+          echo "📁 File size: $(wc -c < ./endpoints/gatus-endpoints.yml) bytes"
 
           echo ""
           echo "--- Config validation ---"
-          final_count=$(yq eval '.endpoints | length' config.yaml)
+          final_count=$(yq eval '.endpoints | length' ./endpoints/gatus-endpoints.yml)
           echo "✅ $final_count endpoints in final config"
 
           if [ "$final_count" -eq 0 ]; then
@@ -239,21 +245,23 @@ jobs:
           # Show all endpoint names for verification
           echo ""
           echo "--- All Endpoint Names ---"
-          yq eval '.endpoints[].name' config.yaml
+          yq eval '.endpoints[].name' ./endpoints/gatus-endpoints.yml
 
           echo ""
           echo "--- Generated Gatus Config (first 50 lines) ---"
-          head -50 config.yaml
+          head -50 ./endpoints/gatus-endpoints.yml
 
           echo ""
-          echo "--- Config validation ---"
-          final_count=$(yq eval '.endpoints | length' config.yaml)
-          echo "✅ $final_count endpoints in final config"
+          echo "--- Final endpoints/gatus-endpoints.yml file verification ---"
+          echo "File exists: $([ -f ./endpoints/gatus-endpoints.yml ] && echo "✅ YES" || echo "❌ NO")"
+          echo "File is readable: $([ -r ./endpoints/gatus-endpoints.yml ] && echo "✅ YES" || echo "❌ NO")"
+          echo "File has content: $([ -s ./endpoints/gatus-endpoints.yml ] && echo "✅ YES ($(wc -l < ./endpoints/gatus-endpoints.yml) lines)" || echo "❌ NO (empty file)")"
 
-          if [ "$final_count" -eq 0 ]; then
-            echo "❌ ERROR: No endpoints found in final config!"
-            exit 1
-          fi
+          # Create config.yaml as a copy for Docker build compatibility
+          echo ""
+          echo "🔗 Creating config.yaml for Docker build..."
+          cp ./endpoints/gatus-endpoints.yml config.yaml
+          echo "✅ config.yaml created as copy of endpoints/gatus-endpoints.yml"
 
       # Test Docker build locally (before GCP auth)
       - name: Test Docker Build
